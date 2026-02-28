@@ -5,7 +5,59 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>1APP Buzzer (Player)</title>
   <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <script>
+    // Theme toggle logic - before body to avoid flash
+    const savedTheme = localStorage.getItem("buzzerTheme") || "dark";
+    if (savedTheme === "light") {
+      document.documentElement.classList.add("light-mode");
+    }
+  </script>
   <style>
+    :root {
+      --bg-color: #0b0f1a;
+      --card-bg: rgba(22, 30, 49, 0.8);
+      --text-main: #f1f5f9;
+      --border-color: rgba(255, 255, 255, 0.1);
+      --input-bg: rgba(255, 255, 255, 0.05);
+    }
+    .light-mode {
+      --bg-color: #f8fafc;
+      --card-bg: rgba(255, 255, 255, 0.9);
+      --text-main: #1e293b;
+      --border-color: rgba(0, 0, 0, 0.1);
+      --input-bg: rgba(0, 0, 0, 0.05);
+    }
+    body { background-color: var(--bg-color); color: var(--text-main); transition: background-color 0.3s, color 0.3s; }
+    .glass-card { background-color: var(--card-bg); border-color: var(--border-color); }
+    .input-field { background-color: var(--input-bg); border-color: var(--border-color); color: var(--text-main); }
+    
+    /* Dynamic Background Patterns */
+    .bg-mesh {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.1) 0px, transparent 50%),
+        radial-gradient(at 50% 0%, rgba(139, 92, 246, 0.05) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.1) 0px, transparent 50%);
+      opacity: 0.6;
+      transition: opacity 1.5s ease;
+    }
+    .bg-mesh-active {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(239, 68, 68, 0.1) 0px, transparent 50%),
+        radial-gradient(at 50% 0%, rgba(245, 158, 11, 0.05) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(239, 68, 68, 0.1) 0px, transparent 50%);
+      opacity: 0;
+      transition: opacity 1.5s ease;
+    }
+    .phase-active .bg-mesh { opacity: 0; }
+    .phase-active .bg-mesh-active { opacity: 1; }
+    
     @keyframes ping-once {
       0% { transform: scale(1); opacity: 0.8; }
       100% { transform: scale(1.5); opacity: 0; }
@@ -22,8 +74,21 @@
     }
   </style>
 </head>
-<body class="bg-[#0b0f1a] text-slate-100 min-h-screen flex flex-col items-center justify-center p-6 font-sans">
-  <div class="w-full max-w-md bg-[#161e31]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
+<body class="min-h-screen flex flex-col items-center justify-center p-6 font-sans">
+  <div class="bg-mesh" id="bgMesh"></div>
+  <div class="bg-mesh-active" id="bgMeshActive"></div>
+  <div class="absolute top-4 right-4 z-50">
+    <button onclick="toggleTheme()" class="p-2 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 transition-all opacity-40 hover:opacity-100 flex items-center justify-center" title="Farbmodus wechseln">
+      <svg id="sunIcon" class="hidden w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M3 12h2.25m.386-6.364 1.591 1.591M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+      </svg>
+      <svg id="moonIcon" class="hidden w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+      </svg>
+    </button>
+  </div>
+
+  <div class="w-full max-w-md glass-card backdrop-blur-xl border rounded-3xl p-8 shadow-2xl transition-all">
     <h1 class="text-4xl font-extrabold tracking-tight mb-8 bg-gradient-to-br from-blue-400 to-indigo-600 bg-clip-text text-transparent">
       1APP BUZZER
     </h1>
@@ -33,13 +98,42 @@
     </div>
 
     <div class="space-y-6">
-      <div class="relative group">
-        <input id="name" placeholder="Dein Name" class="w-full text-xl px-6 py-4 rounded-2xl border border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all duration-500 group-hover:bg-white/10" />
+      <div id="registrationArea" class="space-y-6">
+        <div class="flex flex-wrap gap-2 justify-center mb-2" id="emojiSelection">
+          <button type="button" onclick="selectEmoji('👤')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">👤</button>
+          <button type="button" onclick="selectEmoji('🎮')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🎮</button>
+          <button type="button" onclick="selectEmoji('🦊')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🦊</button>
+          <button type="button" onclick="selectEmoji('🚀')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🚀</button>
+          <button type="button" onclick="selectEmoji('🥑')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🥑</button>
+          <button type="button" onclick="selectEmoji('👻')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">👻</button>
+          <button type="button" onclick="selectEmoji('🦁')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🦁</button>
+          <button type="button" onclick="selectEmoji('🍕')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🍕</button>
+          <button type="button" onclick="selectEmoji('💎')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">💎</button>
+          <button type="button" onclick="selectEmoji('🌈')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🌈</button>
+          <button type="button" onclick="selectEmoji('🐱')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🐱</button>
+          <button type="button" onclick="selectEmoji('🐼')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🐼</button>
+          <button type="button" onclick="selectEmoji('🦖')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🦖</button>
+          <button type="button" onclick="selectEmoji('🍩')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🍩</button>
+          <button type="button" onclick="selectEmoji('🎸')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">🎸</button>
+          <button type="button" onclick="selectEmoji('⚽')" class="emoji-btn p-2 text-2xl rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all">⚽</button>
+        </div>
+        <div class="relative group">
+          <input id="name" placeholder="Dein Name" class="w-full text-xl px-6 py-4 rounded-2xl border input-field placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all duration-500 group-hover:bg-black/5 dark:group-hover:bg-white/10" />
+        </div>
+        <button id="joinBtn" onclick="join()" class="w-full text-xl font-semibold py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] transition-all duration-300 shadow-lg shadow-blue-900/40 disabled:opacity-30 disabled:pointer-events-none hover:shadow-blue-500/40">
+          Name fixieren
+        </button>
       </div>
 
-      <button id="joinBtn" onclick="join()" class="w-full text-xl font-semibold py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] transition-all duration-300 shadow-lg shadow-blue-900/40 disabled:opacity-30 disabled:pointer-events-none hover:shadow-blue-500/40">
-        Name fixieren
-      </button>
+      <div id="profileDisplay" class="hidden flex items-center justify-between p-4 rounded-2xl input-field border">
+        <div class="flex items-center gap-3">
+          <span id="displayEmoji" class="text-3xl">👤</span>
+          <span id="displayName" class="text-xl font-bold truncate max-w-[150px]">Spieler</span>
+        </div>
+        <button onclick="editProfile()" class="text-xs font-bold uppercase tracking-widest px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all">
+          Ändern
+        </button>
+      </div>
 
       <div class="relative flex justify-center py-4">
         <button id="buzzBtn" onclick="buzz()" disabled class="w-full aspect-square rounded-full flex items-center justify-center text-5xl font-black border-8 border-red-500/30 bg-gradient-to-br from-red-500 to-red-700 shadow-[0_0_50px_rgba(239,68,68,0.3)] hover:shadow-[0_0_70px_rgba(239,68,68,0.5)] active:scale-90 active:shadow-inner transition-all duration-150 disabled:grayscale disabled:opacity-20 disabled:pointer-events-none uppercase tracking-widest z-10">
@@ -53,6 +147,10 @@
     <div class="mt-10 text-lg font-medium text-white/60 min-h-[1.5em] animate-pulse" id="msg"></div>
   </div>
 
+  <audio id="clickSound" preload="auto">
+    <source src="https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3" type="audio/mpeg">
+  </audio>
+
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -65,19 +163,47 @@
     let amWinner = false;
     let amQueued = false;
 
+    let selectedEmoji = "👤";
+
+    function selectEmoji(e) {
+      if (nameLocked) return;
+      selectedEmoji = e;
+      document.querySelectorAll(".emoji-btn").forEach(btn => {
+        if (btn.innerText === e) {
+          btn.classList.add("border-blue-500", "bg-blue-500/20");
+        } else {
+          btn.classList.remove("border-blue-500", "bg-blue-500/20");
+        }
+      });
+    }
+    // init
+    selectEmoji(localStorage.getItem("buzzerEmoji") || "👤");
+
     // restore name (but NOT locked)
     const savedName = localStorage.getItem("buzzerName");
+    const savedEmoji = localStorage.getItem("buzzerEmoji") || "👤";
     const savedLocked = localStorage.getItem("buzzerNameLocked") === "true";
     if (savedName) $("name").value = savedName;
     if (savedLocked && savedName) {
       // re-lock after refresh
-      socket.emit("registerName", savedName);
+      socket.emit("registerName", { name: savedName, emoji: savedEmoji });
     }
 
+    function toggleTheme() {
+      const isLight = document.documentElement.classList.toggle("light-mode");
+      localStorage.setItem("buzzerTheme", isLight ? "light" : "dark");
+      updateThemeIcons();
+    }
+
+    function updateThemeIcons() {
+      const isLight = document.documentElement.classList.contains("light-mode");
+      $("sunIcon").classList.toggle("hidden", !isLight);
+      $("moonIcon").classList.toggle("hidden", isLight);
+    }
+    // Set initial icon
+    updateThemeIcons();
+
     function updateUI() {
-      // Buzz button is enabled if:
-      // ...
-      
       const canBuzz = nameLocked && !countdownRunning && !amWinner && !amQueued;
       const wasDisabled = $("buzzBtn").disabled;
       $("buzzBtn").disabled = !canBuzz;
@@ -86,10 +212,22 @@
       if (wasDisabled && canBuzz) {
         $("buzzBtn").classList.add("status-pop");
         setTimeout(() => $("buzzBtn").classList.remove("status-pop"), 300);
+        
+        // Haptic Feedback when buzzer opens
+        if ("vibrate" in navigator) {
+          navigator.vibrate([10, 30, 10]);
+        }
       }
       
-      $("joinBtn").disabled = nameLocked;
-      $("name").disabled = nameLocked;
+      if (nameLocked) {
+        $("registrationArea").classList.add("hidden");
+        $("profileDisplay").classList.remove("hidden");
+        $("displayName").innerText = $("name").value;
+        $("displayEmoji").innerText = selectedEmoji;
+      } else {
+        $("registrationArea").classList.remove("hidden");
+        $("profileDisplay").classList.add("hidden");
+      }
 
       let statusText = "";
       if (!nameLocked) statusText = "Status: Bitte Name fixieren";
@@ -110,13 +248,32 @@
       const name = ($("name").value || "").trim();
       if (!name) { $("msg").innerText = "Bitte Namen eingeben 🙂"; return; }
       localStorage.setItem("buzzerName", name);
-      socket.emit("registerName", name);
-      $("msg").innerText = "Name wird fixiert…";
+      localStorage.setItem("buzzerEmoji", selectedEmoji);
+      socket.emit("registerName", { name, emoji: selectedEmoji });
+      $("msg").innerText = "Profil wird gespeichert…";
+    }
+
+    function editProfile() {
+      nameLocked = false;
+      updateUI();
+      $("msg").innerText = "Profil wird bearbeitet…";
     }
 
     function buzz() {
       socket.emit("buzz");
       $("msg").innerText = "Buzz gesendet…";
+      
+      // Sound Feedback
+      try {
+        const sound = $("clickSound");
+        sound.currentTime = 0;
+        sound.play();
+      } catch(e) {}
+
+      // Haptic Feedback
+      if ("vibrate" in navigator) {
+        navigator.vibrate(50);
+      }
       
       // Animation Trigger
       const ring = $("buzzRing");
@@ -125,12 +282,14 @@
       ring.classList.add("animate-ping-once");
     }
 
-    socket.on("nameLocked", ({ name }) => {
+    socket.on("nameLocked", ({ name, emoji }) => {
       nameLocked = true;
       localStorage.setItem("buzzerName", name);
+      localStorage.setItem("buzzerEmoji", emoji);
       localStorage.setItem("buzzerNameLocked", "true");
       $("name").value = name;
-      $("msg").innerText = `Name fixiert: ${name}`;
+      selectEmoji(emoji);
+      $("msg").innerText = `${emoji} Name fixiert: ${name}`;
       updateUI();
     });
 
@@ -153,6 +312,10 @@
       amWinner = s.winner && s.winner.name === myName;
       amQueued = s.queue && s.queue.some(e => e.name === myName);
       
+      // Dynamic Background Phase Shift
+      const isBuzzerOpen = !s.locked && !s.countdown.running && !s.awaitingDecision;
+      document.body.classList.toggle("phase-active", isBuzzerOpen);
+
       updateUI();
 
       if (!nameLocked) return;
@@ -176,6 +339,25 @@
       locked = false;
       updateUI();
       if (nameLocked) $("msg").innerText = "Neue Runde – bereit!";
+    });
+
+    socket.on("clearPlayers", () => {
+      nameLocked = false;
+      localStorage.setItem("buzzerNameLocked", "false");
+      updateUI();
+      $("msg").innerText = "Spielerliste wurde geleert. Bitte Name neu fixieren.";
+    });
+
+    socket.on("judgement", ({ name, correct }) => {
+      const myName = $("name").value || localStorage.getItem("buzzerName");
+      if (correct && name === myName) {
+        confetti({
+          particleCount: 150,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#3b82f6', '#f59e0b']
+        });
+      }
     });
 
     function goOffline() {

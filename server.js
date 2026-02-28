@@ -1,7 +1,10 @@
+require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const QRCode = require("qrcode");
 const { Server } = require("socket.io");
+const session = require("express-session");
 
 const app = express();
 const server = http.createServer(app);
@@ -14,13 +17,47 @@ app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
 app.use(express.static("public"));
+app.use(express.urlencoded({ extended: true }));
+app.use(session({
+    secret: process.env.SESSION_SECRET || "buzzer-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+}));
 
 app.get("/", (req, res) => {
     res.redirect("/player");
 });
 
-app.get("/host", (req, res) => {
-    res.render("host");
+app.get("/host", async (req, res) => {
+    if (req.session.isHost) {
+        // Generate QR Code for players
+        const protocol = req.protocol;
+        const host = req.get("host");
+        const playerUrl = `${protocol}://${host}/player`;
+        
+        try {
+            const qrCodeData = await QRCode.toDataURL(playerUrl);
+            res.render("host", { qrCodeData, playerUrl });
+        } catch (err) {
+            console.error("QR Code generation failed", err);
+            res.render("host", { qrCodeData: null, playerUrl });
+        }
+    } else {
+        res.render("host_login", { error: null });
+    }
+});
+
+app.post("/host/login", (req, res) => {
+    const { password } = req.body;
+    const hostPassword = process.env.HOST_PASSWORD || "admin";
+
+    if (password === hostPassword) {
+        req.session.isHost = true;
+        res.redirect("/host");
+    } else {
+        res.render("host_login", { error: "Falsches Passwort" });
+    }
 });
 
 app.get("/player", (req, res) => {
@@ -36,8 +73,14 @@ let winner = null;                // { name, at, msFromStart }
 let roundStartAt = null;          // epoch ms
 let countdown = { running: false, remaining: 0 };
 let scores = new Map();           // name -> points
+
+// --- Round config ---
+let roundPoints = 1;              // points for current round
+let autoUnlockTimeout = 10000;    // ms for auto-unlock after buzz (0 = disabled)
+let autoUnlockTimer = null;       // JS Timer handle
+
 // registered users + presence
-let usersByName = new Map();   // name -> { name, online, socketId, lastSeenAt }
+let usersByName = new Map();   // name -> { name, online, socketId, lastSeenAt, reconnectTimer }
 let nameBySocket = new Map();  // socketId -> name
 
 // queue of additional buzzes (for "wrong -> next chance")
@@ -55,7 +98,10 @@ function sanitizeName(name) {
 
 function getLeaderboard() {
     return [...scores.entries()]
-        .map(([name, points]) => ({ name, points }))
+        .map(([name, points]) => {
+            const user = usersByName.get(name);
+            return { name, points, emoji: user ? user.emoji : "👤" };
+        })
         .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
         .slice(0, 10);
 }
@@ -70,23 +116,85 @@ function broadcastState() {
         winner,
         roundStartAt,
         countdown,
+        roundPoints,
+        autoUnlockTimeout,
         leaderboard: getLeaderboard(),
         queueSize: buzzQueue.length,
-        queue: buzzQueue.map(e => ({ name: e.name, msFromStart: e.msFromStart })),
-        users: userList.map(u => ({ name: u.name, online: u.online })), // minimal fürs UI
+        queue: buzzQueue.map(e => {
+            const user = usersByName.get(e.name);
+            return { name: e.name, msFromStart: e.msFromStart, emoji: user ? user.emoji : "👤" };
+        }),
+        users: userList.map(u => ({ name: u.name, online: u.online, emoji: u.emoji })), // minimal fürs UI
     });
 }
 
 function setWinnerFromEntry(entry) {
-    winner = entry;
+    const user = usersByName.get(entry.name);
+    winner = { ...entry, emoji: user ? user.emoji : "👤" };
     locked = true;
     awaitingDecision = true;
+
+    // Auto-unlock timer
+    if (autoUnlockTimer) clearTimeout(autoUnlockTimer);
+    if (autoUnlockTimeout > 0) {
+        autoUnlockTimer = setTimeout(() => {
+            if (winner && awaitingDecision) {
+                // Auto-judge as WRONG (or just clear)
+                handleJudgement(false);
+            }
+        }, autoUnlockTimeout);
+    }
 
     io.emit("winner", { winner, leaderboard: getLeaderboard(), queueSize: buzzQueue.length });
     broadcastState();
 }
 
+function handleJudgement(correct) {
+    if (!winner || !awaitingDecision) return;
+    
+    if (autoUnlockTimer) clearTimeout(autoUnlockTimer);
+
+    const name = winner.name;
+    const delta = correct ? roundPoints : 0;
+
+    if (correct) {
+        scores.set(name, (scores.get(name) || 0) + delta);
+
+        io.emit("judgement", {
+            name,
+            correct: true,
+            delta: delta,
+            leaderboard: getLeaderboard(),
+        });
+
+        awaitingDecision = false;
+        buzzQueue = [];
+        broadcastState();
+        return;
+    }
+
+    // WRONG
+    io.emit("judgement", {
+        name,
+        correct: false,
+        delta: 0,
+        leaderboard: getLeaderboard(),
+    });
+
+    const next = buzzQueue.shift() || null;
+    if (next) {
+        setWinnerFromEntry(next);
+    } else {
+        awaitingDecision = false;
+        winner = null;
+        locked = false;
+        broadcastState();
+        io.emit("noNextCandidate");
+    }
+}
+
 function clearRound(keepScores = true) {
+    if (autoUnlockTimer) clearTimeout(autoUnlockTimer);
     locked = false;
     awaitingDecision = false;
     winner = null;
@@ -105,17 +213,22 @@ io.on("connection", (socket) => {
         winner,
         roundStartAt,
         countdown,
+        roundPoints,
+        autoUnlockTimeout,
         leaderboard: getLeaderboard(),
         queueSize: buzzQueue.length,
         queue: buzzQueue.map(e => ({ name: e.name, msFromStart: e.msFromStart })),
     });
 
-    // NEW: register name once (server enforces lock)
-    socket.on("registerName", (rawName) => {
-        // already locked for this socket
-        if (socket.data.name) {
-            socket.emit("nameLocked", { name: socket.data.name });
-            return;
+    // NEW: register name (server enforces lock, but allows update for same socket)
+    socket.on("registerName", (payload) => {
+        let rawName, emoji;
+        if (typeof payload === "string") {
+            rawName = payload;
+            emoji = "👤";
+        } else {
+            rawName = payload.name;
+            emoji = payload.emoji || "👤";
         }
 
         const name = sanitizeName(rawName);
@@ -127,19 +240,33 @@ io.on("connection", (socket) => {
             return;
         }
 
+        // Reconnect logic: if user was in a "grace period" (disconnect pending), clear it
+        if (existing && existing.reconnectTimer) {
+            clearTimeout(existing.reconnectTimer);
+            existing.reconnectTimer = null;
+        }
+
+        // If user already had a name, and is changing it, clean up old name
+        if (socket.data.name && socket.data.name !== name) {
+            usersByName.delete(socket.data.name);
+            scores.delete(socket.data.name); // Optional: scores could be kept, but usually name change = new identity
+        }
+
         // lock name on socket
         socket.data.name = name;
+        socket.data.emoji = emoji;
         nameBySocket.set(socket.id, name);
 
         // mark presence online
         usersByName.set(name, {
             name,
+            emoji,
             online: true,
             socketId: socket.id,
             lastSeenAt: nowMs(),
         });
 
-        socket.emit("nameLocked", { name });
+        socket.emit("nameLocked", { name, emoji });
         broadcastState();
     });
 
@@ -172,53 +299,33 @@ io.on("connection", (socket) => {
 
     // Host judges current winner
     socket.on("judgeWinner", (payload) => {
-        if (!winner || !awaitingDecision) return;
+        handleJudgement(!!payload?.correct);
+    });
 
-        const correct = !!payload?.correct;
-        const name = winner.name;
+    socket.on("setRoundPoints", (points) => {
+        roundPoints = Math.max(0, Number(points) || 1);
+        broadcastState();
+    });
 
-        if (correct) {
-            // scoring: correct +1
-            scores.set(name, (scores.get(name) || 0) + 1);
+    socket.on("updateScore", ({ name, delta }) => {
+        const current = scores.get(name) || 0;
+        const next = current + (Number(delta) || 0);
+        scores.set(name, Math.max(0, next));
+        broadcastState();
+    });
 
-            io.emit("judgement", {
-                name,
-                correct: true,
-                delta: +1,
-                leaderboard: getLeaderboard(),
-            });
-
-            // After correct: stop awaiting decision; keep locked until next round
-            awaitingDecision = false;
-            buzzQueue = []; // clear queue for next question
-            broadcastState();
-            return;
-        }
-
-        // WRONG: current winner gets -1 (optional)
-        scores.set(name, (scores.get(name) || 0));
-
-        io.emit("judgement", {
-            name,
-            correct: false,
-            delta: 0,
-            leaderboard: getLeaderboard(),
+    socket.on("endGame", () => {
+        const leaderboard = getLeaderboard();
+        // Auch wenn das Leaderboard leer ist, senden wir ein Event, damit das UI reagieren kann (z.B. mit Fehlermeldung)
+        io.emit("gameEnded", { 
+            winner: leaderboard.length > 0 ? leaderboard[0] : { name: "Niemand", emoji: "🤷", points: 0 }, 
+            leaderboard 
         });
+    });
 
-        // Give 2nd chance to next person (from queue)
-        const next = buzzQueue.shift() || null;
-
-        if (next) {
-            // Replace winner immediately, still awaiting decision
-            setWinnerFromEntry(next);
-        } else {
-            // Nobody else buzzed -> keep locked but no awaiting decision (or you can keep awaiting)
-            awaitingDecision = false;
-            winner = null;
-            locked = false; // open again if nobody queued
-            broadcastState();
-            io.emit("noNextCandidate");
-        }
+    socket.on("setAutoUnlock", (ms) => {
+        autoUnlockTimeout = Math.max(0, Number(ms) || 0);
+        broadcastState();
     });
 
     socket.on("disconnect", () => {
@@ -228,12 +335,21 @@ io.on("connection", (socket) => {
             if (u && u.socketId === socket.id) {
                 u.online = false;
                 u.lastSeenAt = nowMs();
+
+                // Grace period: Wait 10s before removing from queue/marking as truly gone
+                if (u.reconnectTimer) clearTimeout(u.reconnectTimer);
+                u.reconnectTimer = setTimeout(() => {
+                    const latestU = usersByName.get(name);
+                    if (latestU && !latestU.online) {
+                        // Truly gone now
+                        buzzQueue = buzzQueue.filter(e => e.name !== name);
+                        broadcastState();
+                    }
+                }, 10000); // 10 seconds grace period
+
                 usersByName.set(name, u);
             }
             nameBySocket.delete(socket.id);
-
-            // optional: aus Queue entfernen
-            buzzQueue = buzzQueue.filter(e => e.name !== name);
         }
         broadcastState();
     });
@@ -264,6 +380,19 @@ io.on("connection", (socket) => {
 
     socket.on("clearScores", () => {
         clearRound(false);
+        broadcastState();
+    });
+
+    socket.on("clearPlayers", () => {
+        clearRound(false);
+        usersByName = new Map();
+        nameBySocket = new Map();
+        // Alle Sockets zwingen, ihren registrierten Namen zu vergessen
+        const allSockets = io.sockets.sockets;
+        for (const [id, s] of allSockets) {
+            s.data.name = null;
+        }
+        io.emit("clearPlayers");
         broadcastState();
     });
 

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Host Login - Buzzer</title>
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-[#0b0f1a] text-slate-100 min-h-screen flex items-center justify-center p-6 font-sans">
+    <div class="w-full max-w-md bg-[#161e31]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
+        <h1 class="text-3xl font-extrabold tracking-tight mb-8 bg-gradient-to-br from-blue-400 to-indigo-600 bg-clip-text text-transparent text-center">
+            HOST LOGIN
+        </h1>
+
+        <% if (error) { %>
+            <div class="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-2xl text-sm text-center">
+                <%= error %>
+            </div>
+        <% } %>
+
+        <form action="/host/login" method="POST" class="space-y-6">
+            <div class="relative group">
+                <input type="password" name="password" placeholder="Host Passwort" required
+                       class="w-full text-xl px-6 py-4 rounded-2xl border border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all duration-500 group-hover:bg-white/10" />
+            </div>
+
+            <button type="submit" class="w-full text-xl font-semibold py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] transition-all duration-300 shadow-lg shadow-blue-900/40 hover:shadow-blue-500/40">
+                Anmelden
+            </button>
+        </form>
+    </div>
+</body>
+</html>

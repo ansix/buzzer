@@ -5,7 +5,71 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>1APP Showmaster Buzzer (Host)</title>
     <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script>
+        const savedTheme = localStorage.getItem("buzzerTheme") || "dark";
+        if (savedTheme === "light") {
+            document.documentElement.classList.add("light-mode");
+        }
+    </script>
     <style>
+        :root {
+            --bg-color: #0b0f1a;
+            --card-bg: rgba(22, 30, 49, 0.8);
+            --text-main: #f1f5f9;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --screen-bg: #0f172a;
+        }
+        .light-mode {
+            --bg-color: #f1f5f9;
+            --card-bg: rgba(255, 255, 255, 0.9);
+            --text-main: #1e293b;
+            --border-color: rgba(0, 0, 0, 0.1);
+            --screen-bg: #ffffff;
+        }
+        body { background-color: var(--bg-color); color: var(--text-main); transition: background-color 0.3s, color 0.3s; }
+        .glass-card { background-color: var(--card-bg); border-color: var(--border-color); }
+        .big-screen { background-color: var(--screen-bg); border-color: var(--border-color); }
+
+        /* Dynamic Background Patterns */
+        .bg-mesh {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+                radial-gradient(at 50% 0%, rgba(139, 92, 246, 0.1) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%);
+            opacity: 0.5;
+            transition: opacity 1.5s ease;
+        }
+        .bg-mesh-active {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(239, 68, 68, 0.15) 0px, transparent 50%),
+                radial-gradient(at 50% 0%, rgba(245, 158, 11, 0.1) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(239, 68, 68, 0.15) 0px, transparent 50%);
+            opacity: 0;
+            transition: opacity 1.5s ease;
+        }
+        .phase-active .bg-mesh { opacity: 0; }
+        .phase-active .bg-mesh-active { opacity: 1; }
+
+        @keyframes float {
+            0% { transform: translateY(0) rotate(0); opacity: 0; }
+            50% { opacity: 0.5; }
+            100% { transform: translateY(-100vh) rotate(360deg); opacity: 0; }
+        }
+        .particle {
+            position: absolute;
+            pointer-events: none;
+            background: white;
+            border-radius: 50%;
+            animation: float 15s infinite linear;
+        }
+        
         .winner-pop {
             animation: winner-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
@@ -29,12 +93,15 @@
         }
     </style>
 </head>
-<body class="bg-[#0b0f1a] text-slate-100 min-h-screen p-2 md:p-4 font-sans">
+<body class="min-h-screen p-2 md:p-4 font-sans overflow-x-hidden">
+<div class="bg-mesh" id="bgMesh"></div>
+<div class="bg-mesh-active" id="bgMeshActive"></div>
+<div id="particlesContainer" class="fixed inset-0 pointer-events-none z-[-1] overflow-hidden"></div>
 <div class="max-w-4xl mx-auto flex flex-col gap-6">
     <!-- Main Control Area -->
     <div class="w-full space-y-6">
-        <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/5 backdrop-blur-md border border-white/10 p-4 rounded-2xl">
-            <div>
+        <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-card backdrop-blur-md border p-4 rounded-2xl relative">
+            <div class="flex items-center gap-4">
                 <h1 class="text-2xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
                     1APP HOST
                 </h1>
@@ -42,12 +109,30 @@
             <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
                 <span class="px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400" id="statusPill">Status: …</span>
                 <span class="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">Runde: <span id="roundStart" class="ml-1 text-white opacity-100">–</span></span>
+                <span class="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">Punkte: <span id="ptsState" class="ml-1 text-white opacity-100">1</span></span>
                 <span class="px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400">Timer: <span id="cdState" class="ml-1 text-white opacity-100">–</span></span>
             </div>
+            <button onclick="toggleTheme()" class="p-2 rounded-lg border border-white/5 bg-white/5 hover:bg-white/10 transition-all opacity-40 hover:opacity-100 flex items-center justify-center" title="Farbmodus wechseln">
+                <svg id="sunIcon" class="hidden w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M3 12h2.25m.386-6.364 1.591 1.591M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+                </svg>
+                <svg id="moonIcon" class="hidden w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+                </svg>
+            </button>
+            <% if (locals.qrCodeData) { %>
+            <button onclick="openQrOverlay()" class="flex items-center gap-3 bg-white/5 p-2 rounded-xl border border-white/10 shadow-lg group/qr hover:bg-white/10 transition-all cursor-pointer">
+                <img src="<%= qrCodeData %>" alt="QR Code" class="w-10 h-10 rounded-lg bg-white p-0.5 group-hover/qr:scale-110 transition-transform duration-300" />
+                <div class="hidden sm:block text-left pr-2">
+                    <p class="text-[9px] text-slate-400 uppercase font-bold tracking-widest leading-none mb-1">Quick Join</p>
+                    <p class="text-[10px] text-blue-400 font-mono leading-none">Anzeigen</p>
+                </div>
+            </button>
+            <% } %>
         </header>
 
         <!-- The Big Screen -->
-        <div class="relative group min-h-[35vh] flex flex-col items-center justify-center rounded-[2rem] bg-[#0f172a] border-2 border-white/5 shadow-2xl overflow-hidden transition-all duration-500 hover:border-blue-500/30" id="bigScreen">
+        <div class="relative group min-h-[35vh] flex flex-col items-center justify-center rounded-[2rem] big-screen border-2 shadow-2xl overflow-hidden transition-all duration-500 hover:border-blue-500/30" id="bigScreen">
             <!-- Background Glow -->
             <div class="absolute inset-0 bg-radial-gradient(circle_at_center,rgba(59,130,246,0.1),transparent) pointer-events-none"></div>
             
@@ -77,34 +162,18 @@
             </div>
         </div>
 
-        <!-- Toolbar -->
-        <div class="bg-white/5 backdrop-blur-md border border-white/10 p-4 rounded-2xl grid grid-cols-2 gap-3 items-center">
-            <button onclick="startCountdown()" class="col-span-2 py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-bold hover:shadow-lg hover:shadow-blue-500/20 active:scale-95 transition-all text-sm">
-                ▶ START NEXT ROUND
+        <!-- Toolbar removed from here -->
+        <div class="glass-card backdrop-blur-md border p-4 rounded-2xl">
+            <button onclick="startCountdown()" class="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-black hover:shadow-lg hover:shadow-blue-500/20 active:scale-95 transition-all text-base uppercase tracking-widest">
+                ▶ Nächste Runde Starten
             </button>
-            <button onclick="resetRound()" class="py-2.5 px-4 rounded-xl bg-white/5 border border-white/10 font-semibold hover:bg-white/10 active:scale-95 transition-all text-xs">
-                Reset Round
-            </button>
-            <button onclick="clearScores()" class="py-2.5 px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 font-semibold hover:bg-rose-500/20 active:scale-95 transition-all text-xs">
-                Clear Scores
-            </button>
-            
-            <div class="flex items-center gap-2 bg-white/5 p-1.5 rounded-xl border border-white/10 col-span-2 mt-1">
-                <button onclick="autoReset()" class="flex-1 py-2 px-4 rounded-lg bg-white/10 font-medium hover:bg-white/20 transition-all text-xs">
-                    Auto-Reset
-                </button>
-                <div class="flex items-center px-3 bg-black/40 rounded-lg">
-                    <input id="autoMs" value="5000" class="bg-transparent border-none text-right font-mono text-blue-400 w-12 focus:outline-none text-xs" />
-                    <span class="ml-1 text-[9px] text-slate-500 font-bold uppercase">ms</span>
-                </div>
-            </div>
         </div>
     </div>
 
     <!-- Info Panels Stacked Below -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- Leaderboard -->
-        <section class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl">
+        <section class="glass-card backdrop-blur-md border rounded-2xl p-4 shadow-xl">
             <h2 class="text-sm font-bold mb-4 flex items-center gap-2">
                 <span class="w-1.5 h-4 bg-amber-400 rounded-full"></span>
                 LEADERBOARD
@@ -117,17 +186,115 @@
         <!-- Queue & Players Side-by-Side on MD -->
         <div class="space-y-6">
             <!-- Queue -->
-            <section class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl border-l-4 border-l-purple-500/50">
+            <section class="glass-card backdrop-blur-md border rounded-2xl p-4 shadow-xl border-l-4 border-l-purple-500/50">
                 <h2 class="text-sm font-bold mb-1">STEAL-QUEUE</h2>
                 <p class="text-[9px] text-slate-500 font-medium mb-4 uppercase tracking-widest">Warteschlange</p>
                 <table class="w-full text-left text-xs" id="queueTable"></table>
             </section>
 
             <!-- Players -->
-            <section class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl">
+            <section class="glass-card backdrop-blur-md border rounded-2xl p-4 shadow-xl">
                 <h2 class="text-sm font-bold mb-4">SPIELER</h2>
                 <table class="w-full text-left text-[11px]" id="usersTable"></table>
             </section>
+        </div>
+    </div>
+
+    <!-- System Controls at the bottom -->
+    <div class="glass-card backdrop-blur-md border p-6 rounded-2xl space-y-6">
+        <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Runden-Einstellungen & System</h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 border-b border-white/5 pb-6">
+            <!-- Points Control -->
+            <div class="space-y-3">
+                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Punkte pro Antwort</label>
+                <div class="flex flex-wrap gap-2">
+                    <% [1, 2, 5, 10].forEach(p => { %>
+                        <button onclick="setPoints(<%= p %>)" id="btnPts<%= p %>" class="flex-1 py-2 px-4 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all font-mono text-sm">
+                            <%= p %>
+                        </button>
+                    <% }) %>
+                </div>
+            </div>
+
+            <!-- Auto-Unlock Control -->
+            <div class="space-y-3">
+                <label class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Auto-Unlock Timer (Antwortzeit)</label>
+                <div class="flex gap-2">
+                    <button onclick="setAutoUnlock(0)" id="btnUnlock0" class="flex-1 py-2 px-4 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-xs">OFF</button>
+                    <button onclick="setAutoUnlock(5000)" id="btnUnlock5" class="flex-1 py-2 px-4 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-xs font-mono">5s</button>
+                    <button onclick="setAutoUnlock(10000)" id="btnUnlock10" class="flex-1 py-2 px-4 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-xs font-mono">10s</button>
+                    <button onclick="setAutoUnlock(15000)" id="btnUnlock15" class="flex-1 py-2 px-4 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-xs font-mono">15s</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button onclick="resetRound()" class="py-3 px-4 rounded-xl bg-white/5 border border-white/10 font-semibold hover:bg-white/10 active:scale-95 transition-all text-xs">
+                Reset Round
+            </button>
+            <button onclick="clearScores()" class="py-3 px-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold hover:bg-amber-500/20 active:scale-95 transition-all text-xs">
+                Clear Scores
+            </button>
+            <button onclick="clearPlayers()" class="py-3 px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 font-semibold hover:bg-rose-500/20 active:scale-95 transition-all text-xs">
+                Clear Players
+            </button>
+        </div>
+        
+        <div class="pt-4 border-t border-white/5">
+            <button onclick="endGame()" class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 font-black hover:shadow-xl hover:shadow-amber-500/20 active:scale-95 transition-all text-base uppercase tracking-[0.2em] shadow-lg">
+                Spiel Beenden & Siegerehrung
+            </button>
+        </div>
+        
+    </div>
+</div>
+
+<div id="gameEndOverlay" class="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl opacity-0 pointer-events-none transition-all duration-1000" onclick="closeEndOverlay()">
+    <div class="glass-card p-12 rounded-[3rem] border-2 border-amber-500/30 shadow-[0_0_100px_rgba(245,158,11,0.2)] scale-90 transition-all duration-700 relative max-w-2xl w-full text-center space-y-8" onclick="event.stopPropagation()">
+        <div class="absolute -top-12 left-1/2 -translate-x-1/2 w-24 h-24 bg-gradient-to-br from-amber-400 to-orange-600 rounded-full flex items-center justify-center text-5xl shadow-2xl border-4 border-white/20">
+            👑
+        </div>
+        
+        <div class="space-y-2 pt-4">
+            <h2 class="text-xl font-bold text-amber-500 uppercase tracking-[0.3em]">Der Gewinner ist</h2>
+            <div id="endWinnerName" class="text-6xl font-black text-white drop-shadow-2xl">...</div>
+        </div>
+
+        <div class="py-8 px-6 bg-white/5 rounded-[2rem] border border-white/10">
+            <h3 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6">Hall of Fame</h3>
+            <div id="hallOfFame" class="space-y-4">
+                <!-- Top 3 results here -->
+            </div>
+        </div>
+
+        <button onclick="closeEndOverlay()" class="w-full py-4 rounded-2xl bg-white/10 hover:bg-white/20 border border-white/10 transition-all font-bold uppercase tracking-widest text-sm">
+            Zurück zur Übersicht
+        </button>
+    </div>
+</div>
+
+<div id="qrOverlay" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md opacity-0 pointer-events-none transition-opacity duration-300" onclick="closeQrOverlay()">
+    <div class="glass-card p-8 rounded-[2.5rem] border shadow-2xl scale-90 transition-transform duration-300 relative max-w-sm w-full text-center space-y-6" onclick="event.stopPropagation()">
+        <button onclick="closeQrOverlay()" class="absolute top-4 right-4 p-2 rounded-full hover:bg-white/10 transition-colors">
+            <svg class="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        </button>
+        
+        <h2 class="text-2xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent uppercase tracking-tighter">
+            Quick Join
+        </h2>
+        
+        <div class="bg-white p-4 rounded-3xl shadow-2xl inline-block group">
+            <img src="<%= locals.qrCodeData %>" alt="QR Code Large" class="w-64 h-64 mx-auto group-hover:scale-105 transition-transform duration-500" />
+        </div>
+        
+        <div class="space-y-2">
+            <p class="text-xs text-slate-500 uppercase font-bold tracking-widest">Scanner oder URL öffnen</p>
+            <p class="text-blue-400 font-mono text-sm break-all leading-relaxed p-3 bg-white/5 rounded-xl border border-white/5">
+                <%= locals.playerUrl %>
+            </p>
         </div>
     </div>
 </div>
@@ -144,6 +311,54 @@
 <script>
     const socket = io();
     const $ = (id) => document.getElementById(id);
+
+    function toggleTheme() {
+        const isLight = document.documentElement.classList.toggle("light-mode");
+        localStorage.setItem("buzzerTheme", isLight ? "light" : "dark");
+        updateThemeIcons();
+    }
+
+    function updateThemeIcons() {
+        const isLight = document.documentElement.classList.contains("light-mode");
+        $("sunIcon").classList.toggle("hidden", !isLight);
+        $("moonIcon").classList.toggle("hidden", isLight);
+        
+        // Update particles color based on theme (only if NOT in active buzzer phase)
+        if (!document.body.classList.contains("phase-active")) {
+            const particles = document.querySelectorAll('.particle');
+            particles.forEach(p => {
+                p.style.background = isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+                p.style.boxShadow = 'none';
+            });
+        }
+    }
+
+    // Dynamic Background Particles
+    function createParticles() {
+        const container = $("particlesContainer");
+        const count = 20;
+        for (let i = 0; i < count; i++) {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            const size = Math.random() * 5 + 2;
+            const left = Math.random() * 100;
+            const duration = Math.random() * 10 + 10;
+            const delay = Math.random() * 10;
+            
+            p.style.width = `${size}px`;
+            p.style.height = `${size}px`;
+            p.style.left = `${left}%`;
+            p.style.bottom = `-20px`;
+            p.style.animationDuration = `${duration}s`;
+            p.style.animationDelay = `${-delay}s`;
+            p.style.background = document.documentElement.classList.contains("light-mode") ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+            
+            container.appendChild(p);
+        }
+    }
+    createParticles();
+    // Set initial icon
+    updateThemeIcons();
 
     function fmtTime(ts) {
         if (!ts) return "–";
@@ -162,13 +377,21 @@
             const bgClass = isTop ? 'bg-white/10' : 'bg-transparent';
             const textClass = idx === 0 ? 'text-amber-400 font-bold' : 'text-slate-300';
             const delay = idx * 50;
+            const emoji = x.emoji || "👤";
             return `
         <tr class="${bgClass} border-b border-white/5 transition-colors hover:bg-white/5 row-slide-in" style="animation-delay: ${delay}ms">
           <td class="py-4 px-4">
             <span class="w-6 inline-block text-slate-500 font-mono text-xs">${idx + 1}</span>
+            <span class="mr-2">${emoji}</span>
             <span class="${textClass}">${escapeHtml(x.name)}</span>
           </td>
-          <td class="py-4 px-4 text-right font-black text-white">${x.points}</td>
+            <td class="py-4 px-4 text-right font-black text-white">
+              <div class="flex items-center justify-end gap-2">
+                <button onclick="updateScore('${x.name}', -1)" class="w-6 h-6 rounded flex items-center justify-center bg-white/5 hover:bg-rose-500/20 text-rose-400 border border-white/10 transition-all cursor-pointer">-</button>
+                <span class="min-w-[1.5rem] text-center">${x.points}</span>
+                <button onclick="updateScore('${x.name}', 1)" class="w-6 h-6 rounded flex items-center justify-center bg-white/5 hover:bg-emerald-500/20 text-emerald-400 border border-white/10 transition-all cursor-pointer">+</button>
+              </div>
+            </td>
         </tr>
       `}).join("");
         $("lb").innerHTML = rows || `<tr><td class="py-4 px-4 text-slate-500 italic">Noch keine Punkte.</td><td></td></tr>`;
@@ -179,6 +402,7 @@
     <tr class="border-b border-white/5">
       <td class="py-3 px-4">
         <span class="text-indigo-400 font-bold mr-2">${idx + 1}.</span>
+        <span class="mr-2">${x.emoji || "👤"}</span>
         <span class="text-slate-200">${escapeHtml(x.name)}</span>
       </td>
       <td class="py-3 px-4 text-right">
@@ -196,6 +420,7 @@
     <tr class="border-b border-white/5 opacity-80 hover:opacity-100 transition-opacity">
       <td class="py-2 px-4 flex items-center gap-2">
         <span class="w-2 h-2 rounded-full ${u.online ? 'bg-emerald-500' : 'bg-slate-600'}"></span>
+        <span class="mr-1">${u.emoji || "👤"}</span>
         <span class="${u.online ? 'text-slate-200' : 'text-slate-500'}">${escapeHtml(u.name)}</span>
       </td>
       <td class="py-2 px-4 text-right text-[10px] uppercase font-bold text-slate-600">
@@ -224,8 +449,9 @@
             return;
         }
         
-        winnerEl.innerText = w.name;
-        if (currentText !== w.name) {
+        const displayText = `${w.emoji || "👤"} ${w.name}`;
+        winnerEl.innerText = displayText;
+        if (currentText !== displayText) {
             winnerEl.classList.remove("winner-pop");
             void winnerEl.offsetWidth;
             winnerEl.classList.add("winner-pop");
@@ -249,9 +475,39 @@
         socket.emit("clearScores");
     }
 
+    function clearPlayers() {
+        if (confirm("Wirklich alle Spieler löschen? Alle müssen sich neu anmelden.")) {
+            socket.emit("clearPlayers");
+        }
+    }
+
     function autoReset() {
         const ms = Number($("autoMs").value || 5000);
         socket.emit("autoResetIn", ms);
+    }
+
+    function setPoints(p) {
+        socket.emit("setRoundPoints", p);
+    }
+
+    function setAutoUnlock(ms) {
+        socket.emit("setAutoUnlock", ms);
+    }
+
+    function openQrOverlay() {
+        const overlay = $("qrOverlay");
+        const modal = overlay.querySelector("div");
+        overlay.classList.remove("opacity-0", "pointer-events-none");
+        modal.classList.remove("scale-90");
+        modal.classList.add("scale-100");
+    }
+
+    function closeQrOverlay() {
+        const overlay = $("qrOverlay");
+        const modal = overlay.querySelector("div");
+        overlay.classList.add("opacity-0", "pointer-events-none");
+        modal.classList.add("scale-90");
+        modal.classList.remove("scale-100");
     }
 
     function markCorrect() {
@@ -265,8 +521,11 @@
     socket.on("judgement", ({ name, correct, delta, leaderboard }) => {
         renderLeaderboard(leaderboard);
 
+        const user = leaderboard.find(l => l.name === name);
+        const emoji = user ? user.emoji : "👤";
+
         const winnerEl = $("winner");
-        winnerEl.innerText = name;
+        winnerEl.innerText = `${emoji} ${name}`;
         winnerEl.classList.remove("winner-pop");
         void winnerEl.offsetWidth;
         winnerEl.classList.add("winner-pop");
@@ -275,13 +534,118 @@
 
         $("subtitle").innerText = correct ? "✅ RICHTIG!" : "❌ FALSCH!";
         $("meta").innerText = `Punkte ${delta >= 0 ? "+" : ""}${delta} • Jetzt nächste Runde starten.`;
+        
+        if (correct) {
+            confetti({
+                particleCount: 150,
+                spread: 70,
+                origin: { y: 0.6 },
+                colors: ['#10b981', '#3b82f6', '#f59e0b']
+            });
+        }
     });
 
     // realtime events
+    function updateScore(name, delta) {
+        socket.emit("updateScore", { name, delta });
+    }
+
+    function endGame() {
+        socket.emit("endGame");
+    }
+
+    function closeEndOverlay() {
+        const overlay = $("gameEndOverlay");
+        overlay.classList.remove("opacity-100");
+        overlay.classList.add("opacity-0", "pointer-events-none");
+        overlay.querySelector("div").classList.add("scale-90");
+    }
+
+    socket.on("gameEnded", ({ winner, leaderboard }) => {
+        const overlay = $("gameEndOverlay");
+        $("endWinnerName").innerText = `${winner.emoji} ${winner.name}`;
+        
+        const hof = $("hallOfFame");
+        if (leaderboard.length === 0) {
+            hof.innerHTML = `<div class="text-slate-500 italic">Noch keine Punkte vergeben.</div>`;
+        } else {
+            hof.innerHTML = leaderboard.slice(0, 3).map((u, i) => `
+                <div class="flex items-center justify-between p-4 rounded-xl ${i === 0 ? 'bg-amber-500/20 border border-amber-500/30' : 'bg-white/5'}">
+                    <div class="flex items-center gap-3">
+                        <span class="text-lg font-black ${i === 0 ? 'text-amber-400' : 'text-slate-500'}">#${i+1}</span>
+                        <span class="text-xl">${u.emoji}</span>
+                        <span class="font-bold text-white">${u.name}</span>
+                    </div>
+                    <div class="font-mono font-black text-white">${u.points} PTS</div>
+                </div>
+            `).join("");
+        }
+
+        overlay.classList.remove("opacity-0", "pointer-events-none");
+        overlay.classList.add("opacity-100");
+        setTimeout(() => overlay.querySelector("div").classList.remove("scale-90"), 50);
+
+        if (leaderboard.length > 0) {
+            // Big Confetti
+            const duration = 5 * 1000;
+            const animationEnd = Date.now() + duration;
+            const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 300 };
+
+            function randomInRange(min, max) {
+                return Math.random() * (max - min) + min;
+            }
+
+            const interval = setInterval(function() {
+                const timeLeft = animationEnd - Date.now();
+                if (timeLeft <= 0) return clearInterval(interval);
+                const particleCount = 50 * (timeLeft / duration);
+                confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+                confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+            }, 250);
+        }
+    });
+
     socket.on("state", (s) => {
         setStatus(s.locked, s.countdown.running);
+        
+        // Dynamic Background Phase Shift
+        const isBuzzerOpen = !s.locked && !s.countdown.running && !s.awaitingDecision;
+        document.body.classList.toggle("phase-active", isBuzzerOpen);
+        
+        // Update particles based on phase
+        const particles = document.querySelectorAll('.particle');
+        particles.forEach(p => {
+            if (isBuzzerOpen) {
+                p.style.background = 'rgba(239, 68, 68, 0.4)'; // Reddish in active phase
+                p.style.boxShadow = '0 0 10px rgba(239, 68, 68, 0.4)';
+            } else {
+                const isLight = document.documentElement.classList.contains("light-mode");
+                p.style.background = isLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)';
+                p.style.boxShadow = 'none';
+            }
+        });
+
         $("roundStart").innerText = fmtTime(s.roundStartAt);
         $("cdState").innerText = s.countdown.running ? `läuft (${s.countdown.remaining})` : "—";
+        $("ptsState").innerText = s.roundPoints;
+
+        // Highlight active config buttons
+        [1, 2, 5, 10].forEach(p => {
+            const btn = $(`btnPts${p}`);
+            if (btn) {
+                if (s.roundPoints === p) btn.classList.add("bg-amber-500/20", "border-amber-500/50", "text-amber-400");
+                else btn.classList.remove("bg-amber-500/20", "border-amber-500/50", "text-amber-400");
+            }
+        });
+
+        [0, 5000, 10000, 15000].forEach(ms => {
+            const btn = $(`btnUnlock${ms === 0 ? '0' : ms/1000}`);
+            if (btn) {
+                if (s.autoUnlockTimeout === ms) btn.classList.add("bg-purple-500/20", "border-purple-500/50", "text-purple-400");
+                else btn.classList.remove("bg-purple-500/20", "border-purple-500/50", "text-purple-400");
+            }
+        });
+
         renderLeaderboard(s.leaderboard);
         renderQueue(s.queue);
         renderUsers(s.users);
