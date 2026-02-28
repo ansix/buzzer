@@ -1,0 +1,21 @@
+{
+  "name": "buzzer",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "build:css": "tailwindcss -i ./public/stylesheets/input.css -o ./public/stylesheets/output.css",
+    "dev": "tailwindcss -i ./public/stylesheets/input.css -o ./public/stylesheets/output.css --watch & node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "~1.4.4",
+    "debug": "~2.6.9",
+    "ejs": "^4.0.1",
+    "express": "5.0.0",
+    "morgan": "~1.9.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.2.1"
+  }
+}

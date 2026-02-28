@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>1APP Showmaster Buzzer (Host)</title>
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <style>
+        .winner-pop {
+            animation: winner-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes winner-pop {
+            0% { transform: scale(0.5); opacity: 0; filter: blur(10px); }
+            100% { transform: scale(1); opacity: 1; filter: blur(0); }
+        }
+        .countdown-pulse {
+            animation: countdown-pulse 1s ease-in-out infinite;
+        }
+        @keyframes countdown-pulse {
+            0%, 100% { transform: scale(1); opacity: 1; text-shadow: 0 0 20px rgba(59,130,246,0.3); }
+            50% { transform: scale(1.1); opacity: 0.8; text-shadow: 0 0 40px rgba(59,130,246,0.6); }
+        }
+        .row-slide-in {
+            animation: slide-in 0.4s ease-out forwards;
+        }
+        @keyframes slide-in {
+            from { transform: translateX(-20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-[#0b0f1a] text-slate-100 min-h-screen p-2 md:p-4 font-sans">
+<div class="max-w-4xl mx-auto flex flex-col gap-6">
+    <!-- Main Control Area -->
+    <div class="w-full space-y-6">
+        <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/5 backdrop-blur-md border border-white/10 p-4 rounded-2xl">
+            <div>
+                <h1 class="text-2xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">
+                    1APP HOST
+                </h1>
+            </div>
+            <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
+                <span class="px-3 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400" id="statusPill">Status: …</span>
+                <span class="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">Runde: <span id="roundStart" class="ml-1 text-white opacity-100">–</span></span>
+                <span class="px-3 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400">Timer: <span id="cdState" class="ml-1 text-white opacity-100">–</span></span>
+            </div>
+        </header>
+
+        <!-- The Big Screen -->
+        <div class="relative group min-h-[35vh] flex flex-col items-center justify-center rounded-[2rem] bg-[#0f172a] border-2 border-white/5 shadow-2xl overflow-hidden transition-all duration-500 hover:border-blue-500/30" id="bigScreen">
+            <!-- Background Glow -->
+            <div class="absolute inset-0 bg-radial-gradient(circle_at_center,rgba(59,130,246,0.1),transparent) pointer-events-none"></div>
+            
+            <div class="relative z-10 text-center space-y-4 p-8">
+                <div class="text-[clamp(2.5rem,8vw,4.5rem)] font-black leading-tight tracking-tighter" id="winner">
+                    BEREIT.
+                </div>
+                <div class="text-xl font-medium text-slate-400 animate-pulse" id="subtitle">
+                    Warte auf Buzzer…
+                </div>
+                <div class="text-[10px] font-mono text-slate-500 bg-white/5 px-3 py-1 rounded-full inline-block" id="meta">
+                    —
+                </div>
+                <div class="text-[6rem] font-black text-blue-500 drop-shadow-[0_0_40px_rgba(59,130,246,0.5)] countdown-pulse" id="countdown" style="display:none;">
+                    3
+                </div>
+            </div>
+
+            <!-- Action Buttons Floating Overlay -->
+            <div id="decisionButtons" class="absolute bottom-6 flex gap-4 z-30 transition-all duration-300 opacity-0 pointer-events-none translate-y-4">
+                <button onclick="markCorrect()" class="group flex items-center justify-center w-16 h-16 rounded-xl bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500 hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer">
+                    <span class="text-2xl group-hover:scale-125 transition-transform pointer-events-none">✅</span>
+                </button>
+                <button onclick="markWrong()" class="group flex items-center justify-center w-16 h-16 rounded-xl bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500 hover:scale-110 active:scale-95 transition-all duration-300 cursor-pointer">
+                    <span class="text-2xl group-hover:scale-125 transition-transform pointer-events-none">❌</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="bg-white/5 backdrop-blur-md border border-white/10 p-4 rounded-2xl grid grid-cols-2 gap-3 items-center">
+            <button onclick="startCountdown()" class="col-span-2 py-3 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-bold hover:shadow-lg hover:shadow-blue-500/20 active:scale-95 transition-all text-sm">
+                ▶ START NEXT ROUND
+            </button>
+            <button onclick="resetRound()" class="py-2.5 px-4 rounded-xl bg-white/5 border border-white/10 font-semibold hover:bg-white/10 active:scale-95 transition-all text-xs">
+                Reset Round
+            </button>
+            <button onclick="clearScores()" class="py-2.5 px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 font-semibold hover:bg-rose-500/20 active:scale-95 transition-all text-xs">
+                Clear Scores
+            </button>
+            
+            <div class="flex items-center gap-2 bg-white/5 p-1.5 rounded-xl border border-white/10 col-span-2 mt-1">
+                <button onclick="autoReset()" class="flex-1 py-2 px-4 rounded-lg bg-white/10 font-medium hover:bg-white/20 transition-all text-xs">
+                    Auto-Reset
+                </button>
+                <div class="flex items-center px-3 bg-black/40 rounded-lg">
+                    <input id="autoMs" value="5000" class="bg-transparent border-none text-right font-mono text-blue-400 w-12 focus:outline-none text-xs" />
+                    <span class="ml-1 text-[9px] text-slate-500 font-bold uppercase">ms</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Info Panels Stacked Below -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Leaderboard -->
+        <section class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl">
+            <h2 class="text-sm font-bold mb-4 flex items-center gap-2">
+                <span class="w-1.5 h-4 bg-amber-400 rounded-full"></span>
+                LEADERBOARD
+            </h2>
+            <div class="overflow-hidden">
+                <table class="w-full text-left text-xs" id="lb"></table>
+            </div>
+        </section>
+
+        <!-- Queue & Players Side-by-Side on MD -->
+        <div class="space-y-6">
+            <!-- Queue -->
+            <section class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl border-l-4 border-l-purple-500/50">
+                <h2 class="text-sm font-bold mb-1">STEAL-QUEUE</h2>
+                <p class="text-[9px] text-slate-500 font-medium mb-4 uppercase tracking-widest">Warteschlange</p>
+                <table class="w-full text-left text-xs" id="queueTable"></table>
+            </section>
+
+            <!-- Players -->
+            <section class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-xl">
+                <h2 class="text-sm font-bold mb-4">SPIELER</h2>
+                <table class="w-full text-left text-[11px]" id="usersTable"></table>
+            </section>
+        </div>
+    </div>
+</div>
+
+<audio id="winSound" preload="auto">
+    <source src="audio/win.mp3" type="audio/mpeg">
+</audio>
+
+<audio id="tickSound" preload="auto">
+    <source src="audio/tick.mp3" type="audio/mpeg">
+</audio>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const socket = io();
+    const $ = (id) => document.getElementById(id);
+
+    function fmtTime(ts) {
+        if (!ts) return "–";
+        const d = new Date(ts);
+        return d.toLocaleTimeString();
+    }
+
+    function setStatus(locked, countdownRunning) {
+        if (countdownRunning) $("statusPill").innerText = "Status: Countdown läuft";
+        else $("statusPill").innerText = locked ? "Status: GESPERRT (erster steht)" : "Status: OFFEN (buzz ready)";
+    }
+
+    function renderLeaderboard(items) {
+        const rows = items.map((x, idx) => {
+            const isTop = idx < 3;
+            const bgClass = isTop ? 'bg-white/10' : 'bg-transparent';
+            const textClass = idx === 0 ? 'text-amber-400 font-bold' : 'text-slate-300';
+            const delay = idx * 50;
+            return `
+        <tr class="${bgClass} border-b border-white/5 transition-colors hover:bg-white/5 row-slide-in" style="animation-delay: ${delay}ms">
+          <td class="py-4 px-4">
+            <span class="w-6 inline-block text-slate-500 font-mono text-xs">${idx + 1}</span>
+            <span class="${textClass}">${escapeHtml(x.name)}</span>
+          </td>
+          <td class="py-4 px-4 text-right font-black text-white">${x.points}</td>
+        </tr>
+      `}).join("");
+        $("lb").innerHTML = rows || `<tr><td class="py-4 px-4 text-slate-500 italic">Noch keine Punkte.</td><td></td></tr>`;
+    }
+
+    function renderQueue(queue) {
+        const rows = (queue || []).map((x, idx) => `
+    <tr class="border-b border-white/5">
+      <td class="py-3 px-4">
+        <span class="text-indigo-400 font-bold mr-2">${idx + 1}.</span>
+        <span class="text-slate-200">${escapeHtml(x.name)}</span>
+      </td>
+      <td class="py-3 px-4 text-right">
+        <span class="text-xs font-mono text-slate-500">${x.msFromStart == null ? "—" : ("+" + x.msFromStart + "ms")}</span>
+      </td>
+    </tr>
+  `).join("");
+
+        document.getElementById("queueTable").innerHTML =
+            rows || `<tr><td class="py-4 px-4 text-slate-500 italic text-sm">Niemand wartet.</td><td></td></tr>`;
+    }
+
+    function renderUsers(users) {
+        const rows = (users || []).map((u) => `
+    <tr class="border-b border-white/5 opacity-80 hover:opacity-100 transition-opacity">
+      <td class="py-2 px-4 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full ${u.online ? 'bg-emerald-500' : 'bg-slate-600'}"></span>
+        <span class="${u.online ? 'text-slate-200' : 'text-slate-500'}">${escapeHtml(u.name)}</span>
+      </td>
+      <td class="py-2 px-4 text-right text-[10px] uppercase font-bold text-slate-600">
+        ${u.online ? 'Online' : 'Offline'}
+      </td>
+    </tr>
+  `).join("");
+
+        document.getElementById("usersTable").innerHTML =
+            rows || `<tr><td class="py-4 px-4 text-slate-500 italic text-xs text-center">Keine Spieler.</td></tr>`;
+    }
+
+    function escapeHtml(s) {
+        return String(s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+    }
+
+    function showWinner(w) {
+        const winnerEl = $("winner");
+        const currentText = winnerEl.innerText;
+        
+        if (!w) {
+            winnerEl.innerText = "Bereit.";
+            $("subtitle").innerText = "Warte auf Buzzer…";
+            $("meta").innerText = "—";
+            winnerEl.classList.remove("winner-pop", "text-emerald-400", "text-rose-400");
+            return;
+        }
+        
+        winnerEl.innerText = w.name;
+        if (currentText !== w.name) {
+            winnerEl.classList.remove("winner-pop");
+            void winnerEl.offsetWidth;
+            winnerEl.classList.add("winner-pop");
+        }
+        
+        $("subtitle").innerText = "hat gebuzzert!";
+        const ms = (w.msFromStart === null) ? "—" : `${w.msFromStart} ms`;
+        $("meta").innerText = `Zeit: ${fmtTime(w.at)} • Reaktionszeit: ${ms}`;
+        try { $("winSound").currentTime = 0; $("winSound").play(); } catch(e) {}
+    }
+
+    function startCountdown() {
+        socket.emit("startCountdown", 3); // 3..10 erlaubt
+    }
+
+    function resetRound() {
+        socket.emit("resetRound");
+    }
+
+    function clearScores() {
+        socket.emit("clearScores");
+    }
+
+    function autoReset() {
+        const ms = Number($("autoMs").value || 5000);
+        socket.emit("autoResetIn", ms);
+    }
+
+    function markCorrect() {
+        socket.emit("judgeWinner", { correct: true });
+    }
+
+    function markWrong() {
+        socket.emit("judgeWinner", { correct: false });
+    }
+
+    socket.on("judgement", ({ name, correct, delta, leaderboard }) => {
+        renderLeaderboard(leaderboard);
+
+        const winnerEl = $("winner");
+        winnerEl.innerText = name;
+        winnerEl.classList.remove("winner-pop");
+        void winnerEl.offsetWidth;
+        winnerEl.classList.add("winner-pop");
+        
+        winnerEl.classList.add(correct ? "text-emerald-400" : "text-rose-400");
+
+        $("subtitle").innerText = correct ? "✅ RICHTIG!" : "❌ FALSCH!";
+        $("meta").innerText = `Punkte ${delta >= 0 ? "+" : ""}${delta} • Jetzt nächste Runde starten.`;
+    });
+
+    // realtime events
+    socket.on("state", (s) => {
+        setStatus(s.locked, s.countdown.running);
+        $("roundStart").innerText = fmtTime(s.roundStartAt);
+        $("cdState").innerText = s.countdown.running ? `läuft (${s.countdown.remaining})` : "—";
+        renderLeaderboard(s.leaderboard);
+        renderQueue(s.queue);
+        renderUsers(s.users);
+
+        showWinner(s.winner);
+
+        // Show/Hide decision buttons
+        const btnContainer = $("decisionButtons");
+        if (s.awaitingDecision) {
+            btnContainer.classList.remove("opacity-0", "pointer-events-none", "translate-y-4");
+            btnContainer.classList.add("opacity-100", "translate-y-0");
+        } else {
+            btnContainer.classList.add("opacity-0", "pointer-events-none", "translate-y-4");
+            btnContainer.classList.remove("opacity-100", "translate-y-0");
+        }
+
+        document.getElementById("cdState").innerText =
+            s.countdown.running ? `läuft (${s.countdown.remaining})` : `Queue: ${s.queueSize}`;
+
+        // countdown UI
+        if (s.countdown.running) {
+            $("countdown").style.display = "block";
+            $("countdown").innerText = s.countdown.remaining;
+        } else {
+            $("countdown").style.display = "none";
+        }
+    });
+
+    socket.on("winner", ({ winner, leaderboard }) => {
+        renderLeaderboard(leaderboard);
+        showWinner(winner);
+    });
+
+    socket.on("countdown", ({ remaining }) => {
+        $("countdown").style.display = "block";
+        $("countdown").innerText = remaining;
+        try { $("tickSound").currentTime = 0; $("tickSound").play(); } catch(e) {}
+        $("subtitle").innerText = "Countdown… gleich geht’s los!";
+        $("meta").innerText = "—";
+        $("winner").innerText = "READY?";
+    });
+
+    socket.on("countdownDone", ({ roundStartAt }) => {
+        $("countdown").style.display = "none";
+        $("winner").innerText = "LOS!";
+        $("subtitle").innerText = "Buzz ist offen.";
+        $("meta").innerText = `Runde gestartet: ${fmtTime(roundStartAt)}`;
+    });
+
+    socket.on("roundReset", ({ roundStartAt }) => {
+        $("countdown").style.display = "none";
+        $("winner").innerText = "Bereit.";
+        $("subtitle").innerText = "Warte auf Buzzer…";
+        $("meta").innerText = `Runde gestartet: ${fmtTime(roundStartAt)}`;
+    });
+</script>
+</body>
+</html>

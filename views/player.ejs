@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>1APP Buzzer (Player)</title>
+  <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+  <style>
+    @keyframes ping-once {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    .animate-ping-once {
+      animation: ping-once 0.5s cubic-bezier(0, 0, 0.2, 1) forwards;
+    }
+    .status-pop {
+      animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes pop {
+      0% { transform: scale(0.9); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body class="bg-[#0b0f1a] text-slate-100 min-h-screen flex flex-col items-center justify-center p-6 font-sans">
+  <div class="w-full max-w-md bg-[#161e31]/80 backdrop-blur-xl border border-white/10 rounded-3xl p-8 shadow-2xl">
+    <h1 class="text-4xl font-extrabold tracking-tight mb-8 bg-gradient-to-br from-blue-400 to-indigo-600 bg-clip-text text-transparent">
+      1APP BUZZER
+    </h1>
+    
+    <div class="inline-flex items-center px-4 py-2 rounded-2xl border border-blue-500/20 bg-blue-500/10 text-blue-300 text-sm font-medium mb-8" id="status">
+      Status: …
+    </div>
+
+    <div class="space-y-6">
+      <div class="relative group">
+        <input id="name" placeholder="Dein Name" class="w-full text-xl px-6 py-4 rounded-2xl border border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all duration-500 group-hover:bg-white/10" />
+      </div>
+
+      <button id="joinBtn" onclick="join()" class="w-full text-xl font-semibold py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-[0.98] transition-all duration-300 shadow-lg shadow-blue-900/40 disabled:opacity-30 disabled:pointer-events-none hover:shadow-blue-500/40">
+        Name fixieren
+      </button>
+
+      <div class="relative flex justify-center py-4">
+        <button id="buzzBtn" onclick="buzz()" disabled class="w-full aspect-square rounded-full flex items-center justify-center text-5xl font-black border-8 border-red-500/30 bg-gradient-to-br from-red-500 to-red-700 shadow-[0_0_50px_rgba(239,68,68,0.3)] hover:shadow-[0_0_70px_rgba(239,68,68,0.5)] active:scale-90 active:shadow-inner transition-all duration-150 disabled:grayscale disabled:opacity-20 disabled:pointer-events-none uppercase tracking-widest z-10">
+          BUZZ!
+        </button>
+        <!-- Animation Ring -->
+        <div id="buzzRing" class="absolute inset-0 rounded-full border-4 border-red-500 opacity-0 pointer-events-none"></div>
+      </div>
+    </div>
+
+    <div class="mt-10 text-lg font-medium text-white/60 min-h-[1.5em] animate-pulse" id="msg"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const $ = (id) => document.getElementById(id);
+
+    let locked = false;
+    let awaitingDecision = false;
+    let countdownRunning = false;
+    let nameLocked = false;
+    let amWinner = false;
+    let amQueued = false;
+
+    // restore name (but NOT locked)
+    const savedName = localStorage.getItem("buzzerName");
+    const savedLocked = localStorage.getItem("buzzerNameLocked") === "true";
+    if (savedName) $("name").value = savedName;
+    if (savedLocked && savedName) {
+      // re-lock after refresh
+      socket.emit("registerName", savedName);
+    }
+
+    function updateUI() {
+      // Buzz button is enabled if:
+      // ...
+      
+      const canBuzz = nameLocked && !countdownRunning && !amWinner && !amQueued;
+      const wasDisabled = $("buzzBtn").disabled;
+      $("buzzBtn").disabled = !canBuzz;
+      
+      // Feedback if becomes enabled
+      if (wasDisabled && canBuzz) {
+        $("buzzBtn").classList.add("status-pop");
+        setTimeout(() => $("buzzBtn").classList.remove("status-pop"), 300);
+      }
+      
+      $("joinBtn").disabled = nameLocked;
+      $("name").disabled = nameLocked;
+
+      let statusText = "";
+      if (!nameLocked) statusText = "Status: Bitte Name fixieren";
+      else if (countdownRunning) statusText = "Status: Countdown…";
+      else if (amWinner) statusText = "Status: Du bist der Winner!";
+      else if (amQueued) statusText = "Status: In der Warteschlange";
+      else statusText = (locked || awaitingDecision) ? "Status: Steal possible!" : "Status: Offen";
+
+      if ($("status").innerText !== statusText) {
+        $("status").innerText = statusText;
+        $("status").classList.remove("status-pop");
+        void $("status").offsetWidth;
+        $("status").classList.add("status-pop");
+      }
+    }
+
+    function join() {
+      const name = ($("name").value || "").trim();
+      if (!name) { $("msg").innerText = "Bitte Namen eingeben 🙂"; return; }
+      localStorage.setItem("buzzerName", name);
+      socket.emit("registerName", name);
+      $("msg").innerText = "Name wird fixiert…";
+    }
+
+    function buzz() {
+      socket.emit("buzz");
+      $("msg").innerText = "Buzz gesendet…";
+      
+      // Animation Trigger
+      const ring = $("buzzRing");
+      ring.classList.remove("animate-ping-once");
+      void ring.offsetWidth; // trigger reflow
+      ring.classList.add("animate-ping-once");
+    }
+
+    socket.on("nameLocked", ({ name }) => {
+      nameLocked = true;
+      localStorage.setItem("buzzerName", name);
+      localStorage.setItem("buzzerNameLocked", "true");
+      $("name").value = name;
+      $("msg").innerText = `Name fixiert: ${name}`;
+      updateUI();
+    });
+
+    socket.on("nameRejected", ({ reason, name }) => {
+      if (reason === "NAME_TAKEN") {
+        $("msg").innerText = `Name "${name}" ist schon vergeben. Bitte einen anderen wählen.`;
+        // allow changing again
+        nameLocked = false;
+        localStorage.setItem("buzzerNameLocked", "false");
+        updateUI();
+      }
+    });
+
+    socket.on("state", (s) => {
+      locked = s.locked;
+      awaitingDecision = s.awaitingDecision;
+      countdownRunning = s.countdown.running;
+      
+      const myName = $("name").value || localStorage.getItem("buzzerName");
+      amWinner = s.winner && s.winner.name === myName;
+      amQueued = s.queue && s.queue.some(e => e.name === myName);
+      
+      updateUI();
+
+      if (!nameLocked) return;
+
+      if (countdownRunning) $("msg").innerText = "Countdown…";
+      else if (amWinner) $("msg").innerText = "DU BIST ERSTER! Warte auf Host...";
+      else if (amQueued) $("msg").innerText = "In der Queue. Warte...";
+      else if (!s.winner && !s.awaitingDecision && !s.locked) $("msg").innerText = "Bereit!";
+      else if (s.winner) $("msg").innerText = `Aktuell vorne: ${s.winner.name}`;
+    });
+
+    socket.on("countdownDone", () => {
+      countdownRunning = false;
+      locked = false;
+      updateUI();
+      if (nameLocked) $("msg").innerText = "LOS! Buzz ist offen!";
+    });
+
+    socket.on("roundReset", () => {
+      countdownRunning = false;
+      locked = false;
+      updateUI();
+      if (nameLocked) $("msg").innerText = "Neue Runde – bereit!";
+    });
+
+    function goOffline() {
+      try { socket.emit("offlineNow"); } catch(e) {}
+    }
+
+    // iOS/Safari: pagehide ist zuverlässiger als beforeunload
+    window.addEventListener("pagehide", goOffline);
+    window.addEventListener("beforeunload", goOffline);
+
+    // Optional: wenn Tab nur in den Hintergrund geht, auch offline setzen:
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") goOffline();
+    });
+
+    updateUI();
+  </script>
+</body>
+</html>
