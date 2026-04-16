@@ -4,13 +4,13 @@ A modern, real-time buzzer application for quiz nights, game shows, or classroom
 
 ## Features
 
-- **Real-time Interaction:** Instant buzzer response using Socket.io.
+- **Real-time Interaction:** Instant buzzer response and live emoji reactions.
 - **Host Dashboard:** Complete control over the game, including scoring, player management, and game flow.
-- **Player Interface:** Mobile-friendly interface with customizable avatars (emojis) and dark/light mode.
+- **Player Interface:** Mobile-friendly interface with customizable avatars (emojis), haptic feedback (vibration), and dark/light mode.
 - **QR Code Integration:** Easy player joining via auto-generated QR codes.
-- **Scoring System:** Track points and display a "Hall of Fame" at the end of the game.
-- **Automated Mechanics:** Configurable countdowns and auto-unlocking buzzers.
-- **Visual Effects:** Confetti animations and dynamic background transitions.
+- **Scoring System:** Track points, display a "Hall of Fame" at the end of the game, and see real-time scores on player devices.
+- **Automated Mechanics:** Configurable countdowns, auto-unlocking buzzers, and optional point subtraction for wrong answers.
+- **Visual & Audio Effects:** Floating emoji reactions, confetti animations, tactile buzzer effects, and a full game show sound system.
 
 ## Tech Stack
 
@@ -67,5 +67,6 @@ Once running, access the application at:
 2. **Invite Players:** Share the URL or have players scan the QR code displayed on the host dashboard.
 3. **Start the Game:** 
    - Players register with a name and an emoji.
-   - The host manages rounds, awards points for correct answers, and resets the buzzer for the next question.
+   - Players can send real-time reactions (🔥, 👏, etc.) using the emoji buttons on their interface.
+   - The host manages rounds, awards points, and can toggle optional point subtraction in "System Settings".
 4. **End Game:** Use the "Spiel Beenden" button to see the final winner and the Hall of Fame.

@@ -76,6 +76,7 @@ let scores = new Map();           // name -> points
 
 // --- Round config ---
 let roundPoints = 1;              // points for current round
+let subtractOnWrong = false;      // subtract points if answer is wrong
 let autoUnlockTimeout = 10000;    // ms for auto-unlock after buzz (0 = disabled)
 let autoUnlockTimer = null;       // JS Timer handle
 
@@ -117,6 +118,7 @@ function broadcastState() {
         roundStartAt,
         countdown,
         roundPoints,
+        subtractOnWrong,
         autoUnlockTimeout,
         leaderboard: getLeaderboard(),
         queueSize: buzzQueue.length,
@@ -124,7 +126,12 @@ function broadcastState() {
             const user = usersByName.get(e.name);
             return { name: e.name, msFromStart: e.msFromStart, emoji: user ? user.emoji : "👤" };
         }),
-        users: userList.map(u => ({ name: u.name, online: u.online, emoji: u.emoji })), // minimal fürs UI
+        users: userList.map(u => ({
+            name: u.name,
+            online: u.online,
+            emoji: u.emoji,
+            points: scores.get(u.name) || 0
+        })), // minimal für Player/Host UI
     });
 }
 
@@ -155,9 +162,10 @@ function handleJudgement(correct) {
     if (autoUnlockTimer) clearTimeout(autoUnlockTimer);
 
     const name = winner.name;
-    const delta = correct ? roundPoints : 0;
+    let delta = 0;
 
     if (correct) {
+        delta = roundPoints;
         scores.set(name, (scores.get(name) || 0) + delta);
 
         io.emit("judgement", {
@@ -174,10 +182,16 @@ function handleJudgement(correct) {
     }
 
     // WRONG
+    if (subtractOnWrong) {
+        delta = -roundPoints;
+        const current = scores.get(name) || 0;
+        scores.set(name, Math.max(0, current + delta));
+    }
+
     io.emit("judgement", {
         name,
         correct: false,
-        delta: 0,
+        delta: delta,
         leaderboard: getLeaderboard(),
     });
 
@@ -214,6 +228,7 @@ io.on("connection", (socket) => {
         roundStartAt,
         countdown,
         roundPoints,
+        subtractOnWrong,
         autoUnlockTimeout,
         leaderboard: getLeaderboard(),
         queueSize: buzzQueue.length,
@@ -270,6 +285,12 @@ io.on("connection", (socket) => {
         broadcastState();
     });
 
+    socket.on("reaction", (emoji) => {
+        const name = socket.data.name;
+        if (!name) return;
+        io.emit("reaction", { name, emoji });
+    });
+
     socket.on("buzz", () => {
         // no name in payload anymore; server uses locked name
         const name = socket.data.name;
@@ -321,6 +342,11 @@ io.on("connection", (socket) => {
             winner: leaderboard.length > 0 ? leaderboard[0] : { name: "Niemand", emoji: "🤷", points: 0 }, 
             leaderboard 
         });
+    });
+
+    socket.on("setSubtractOnWrong", (val) => {
+        subtractOnWrong = !!val;
+        broadcastState();
     });
 
     socket.on("setAutoUnlock", (ms) => {

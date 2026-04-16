@@ -91,6 +91,20 @@
             from { transform: translateX(-20px); opacity: 0; }
             to { transform: translateX(0); opacity: 1; }
         }
+
+        /* Reactions */
+        @keyframes reaction-float {
+            0% { transform: translateY(0) scale(0.5); opacity: 0; }
+            20% { opacity: 1; transform: translateY(-20vh) scale(1.2); }
+            80% { opacity: 1; }
+            100% { transform: translateY(-100vh) scale(1); opacity: 0; }
+        }
+        .reaction-anim-el {
+            animation: reaction-float 4s cubic-bezier(0.1, 0.4, 0.5, 1) forwards;
+        }
+        .shadow-glow {
+            text-shadow: 0 0 10px rgba(255,255,255,0.4);
+        }
     </style>
 </head>
 <body class="min-h-screen p-2 md:p-4 font-sans overflow-x-hidden">
@@ -227,6 +241,20 @@
                     <button onclick="setAutoUnlock(15000)" id="btnUnlock15" class="flex-1 py-2 px-4 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-xs font-mono">15s</button>
                 </div>
             </div>
+
+            <!-- Subtract on Wrong Control -->
+            <div class="space-y-3 md:col-span-2">
+                <div class="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10">
+                    <div class="flex flex-col">
+                        <span class="text-xs font-bold text-slate-200 uppercase tracking-wider">Punktabzug bei falscher Antwort</span>
+                        <span class="text-[10px] text-slate-500 font-medium">Zieht die eingestellten Rundenpunkte bei Fehlern ab (Min. 0)</span>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="subtractToggle" class="sr-only peer" onchange="toggleSubtract(this.checked)">
+                        <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
+                    </label>
+                </div>
+            </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -299,10 +327,15 @@
     </div>
 </div>
 
-<audio id="winSound" preload="auto">
+<audio id="buzzSound" preload="auto">
+    <source src="audio/buzz.mp3" type="audio/mpeg">
+</audio>
+<audio id="correctSound" preload="auto">
     <source src="audio/win.mp3" type="audio/mpeg">
 </audio>
-
+<audio id="wrongSound" preload="auto">
+    <source src="https://assets.mixkit.co/active_storage/sfx/2020/2020-preview.mp3" type="audio/mpeg">
+</audio>
 <audio id="tickSound" preload="auto">
     <source src="audio/tick.mp3" type="audio/mpeg">
 </audio>
@@ -460,7 +493,7 @@
         $("subtitle").innerText = "hat gebuzzert!";
         const ms = (w.msFromStart === null) ? "—" : `${w.msFromStart} ms`;
         $("meta").innerText = `Zeit: ${fmtTime(w.at)} • Reaktionszeit: ${ms}`;
-        try { $("winSound").currentTime = 0; $("winSound").play(); } catch(e) {}
+        try { $("buzzSound").currentTime = 0; $("buzzSound").play(); } catch(e) {}
     }
 
     function startCountdown() {
@@ -492,6 +525,10 @@
 
     function setAutoUnlock(ms) {
         socket.emit("setAutoUnlock", ms);
+    }
+
+    function toggleSubtract(val) {
+        socket.emit("setSubtractOnWrong", val);
     }
 
     function openQrOverlay() {
@@ -536,13 +573,45 @@
         $("meta").innerText = `Punkte ${delta >= 0 ? "+" : ""}${delta} • Jetzt nächste Runde starten.`;
         
         if (correct) {
+            try { $("correctSound").currentTime = 0; $("correctSound").play(); } catch(e) {}
             confetti({
                 particleCount: 150,
                 spread: 70,
                 origin: { y: 0.6 },
                 colors: ['#10b981', '#3b82f6', '#f59e0b']
             });
+        } else {
+            try { $("wrongSound").currentTime = 0; $("wrongSound").play(); } catch(e) {}
         }
+    });
+
+    socket.on("reaction", ({ name, emoji }) => {
+        const container = $("reactionContainer");
+        if (!container) return;
+
+        const reactionEl = document.createElement("div");
+        reactionEl.className = "absolute reaction-anim-el pointer-events-none z-[9999]";
+        reactionEl.style.left = (Math.random() * 80 + 10) + "%";
+        reactionEl.style.bottom = "0";
+        reactionEl.style.width = "120px";
+        reactionEl.style.marginLeft = "-60px";
+        reactionEl.innerHTML = `
+            <div class="flex flex-col items-center justify-end h-full">
+                <div class="px-2 py-0.5 rounded-full bg-black/60 border border-white/20 shadow-xl mb-2 backdrop-blur-sm">
+                    <p class="text-[10px] font-bold text-white whitespace-nowrap">${name}</p>
+                </div>
+                <div class="text-6xl filter drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">
+                    ${emoji}
+                </div>
+            </div>
+        `;
+        container.appendChild(reactionEl);
+        
+        setTimeout(() => {
+            if (reactionEl && reactionEl.parentNode) {
+                reactionEl.remove();
+            }
+        }, 4000);
     });
 
     // realtime events
@@ -628,6 +697,7 @@
         $("roundStart").innerText = fmtTime(s.roundStartAt);
         $("cdState").innerText = s.countdown.running ? `läuft (${s.countdown.remaining})` : "—";
         $("ptsState").innerText = s.roundPoints;
+        $("subtractToggle").checked = !!s.subtractOnWrong;
 
         // Highlight active config buttons
         [1, 2, 5, 10].forEach(p => {
@@ -702,5 +772,6 @@
         $("meta").innerText = `Runde gestartet: ${fmtTime(roundStartAt)}`;
     });
 </script>
+<div id="reactionContainer" class="fixed inset-0 pointer-events-none z-[9999]"></div>
 </body>
 </html>
