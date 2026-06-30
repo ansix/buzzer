@@ -279,6 +279,7 @@ io.on("connection", (socket) => {
             online: true,
             socketId: socket.id,
             lastSeenAt: nowMs(),
+            lastReactionAt: existing ? existing.lastReactionAt : 0,
         });
 
         socket.emit("nameLocked", { name, emoji });
@@ -288,6 +289,17 @@ io.on("connection", (socket) => {
     socket.on("reaction", (emoji) => {
         const name = socket.data.name;
         if (!name) return;
+
+        const user = usersByName.get(name);
+        if (!user) return;
+
+        const now = nowMs();
+        if (user.lastReactionAt && (now - user.lastReactionAt < 60000)) {
+            // 1 reaction per minute
+            return;
+        }
+
+        user.lastReactionAt = now;
         io.emit("reaction", { name, emoji });
     });
 

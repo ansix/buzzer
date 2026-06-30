@@ -180,6 +180,7 @@
     let nameLocked = false;
     let amWinner = false;
     let amQueued = false;
+    let lastReactionTime = parseInt(localStorage.getItem("buzzerLastReaction") || "0");
 
     let selectedEmoji = "👤";
 
@@ -262,6 +263,27 @@
         void $("status").offsetWidth;
         $("status").classList.add("status-pop");
       }
+
+      updateReactionButtons();
+    }
+
+    function updateReactionButtons() {
+      const now = Date.now();
+      const timeLeft = 60000 - (now - lastReactionTime);
+      const isCooldown = timeLeft > 0;
+      
+      const buttons = document.querySelectorAll("#reactionArea button");
+      buttons.forEach(btn => {
+        btn.disabled = isCooldown;
+        btn.style.opacity = isCooldown ? "0.3" : "1";
+        btn.style.pointerEvents = isCooldown ? "none" : "auto";
+      });
+      
+      if (isCooldown) {
+        // Clear any existing timeout to avoid multiple timers
+        if (window.reactionCooldownTimeout) clearTimeout(window.reactionCooldownTimeout);
+        window.reactionCooldownTimeout = setTimeout(updateReactionButtons, timeLeft + 100);
+      }
     }
 
     function join() {
@@ -308,8 +330,16 @@
 
     function sendReaction(emoji) {
       if (!nameLocked) return;
-      socket.emit("reaction", emoji);
       
+      const now = Date.now();
+      if (now - lastReactionTime < 60000) return;
+
+      lastReactionTime = now;
+      localStorage.setItem("buzzerLastReaction", now.toString());
+
+      socket.emit("reaction", emoji);
+      updateReactionButtons();
+
       // Haptic feedback for reaction
       if ("vibrate" in navigator) {
         navigator.vibrate(30);
