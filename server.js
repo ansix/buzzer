@@ -71,6 +71,7 @@ let locked = false;                // true when a winner is on screen (and durin
 let awaitingDecision = false;      // host must judge correct/wrong
 let winner = null;                // { name, at, msFromStart }
 let roundStartAt = null;          // epoch ms
+let roundNumber = 1;              // current round number
 let countdown = { running: false, remaining: 0 };
 let scores = new Map();           // name -> points
 
@@ -116,6 +117,7 @@ function broadcastState() {
         awaitingDecision,
         winner,
         roundStartAt,
+        roundNumber,
         countdown,
         roundPoints,
         subtractOnWrong,
@@ -214,7 +216,12 @@ function clearRound(keepScores = true) {
     winner = null;
     buzzQueue = [];
     roundStartAt = nowMs();
-    if (!keepScores) scores = new Map();
+    if (keepScores) {
+        roundNumber++;
+    } else {
+        scores = new Map();
+        roundNumber = 1;
+    }
 }
 
 io.on("connection", (socket) => {
@@ -226,6 +233,7 @@ io.on("connection", (socket) => {
         awaitingDecision,
         winner,
         roundStartAt,
+        roundNumber,
         countdown,
         roundPoints,
         subtractOnWrong,
@@ -308,6 +316,7 @@ io.on("connection", (socket) => {
         const name = socket.data.name;
         if (!name) return;                 // must register first
         if (countdown.running) return;     // ignore during countdown
+        if (roundNumber > 1) return;       // only active on first round
 
         const at = nowMs();
         const msFromStart = roundStartAt ? at - roundStartAt : null;
